@@ -3,21 +3,22 @@
 A minimal Chromium extension that automatically claims the **Arknights: Endfield**
 daily check-in on [SKPORT](https://game.skport.com/endfield/sign-in).
 
-Unlike a HoYoLAB-style check-in (which rides on cookies), SKPORT authenticates each
-request with custom headers: a `cred` token plus a per-request `sign` derived from a
-short-lived signing token. This extension reads `cred` + token from the page's
-`localStorage`, regenerates a fresh `sign` on every run, and POSTs the check-in.
+Unlike a HoYoLAB-style check-in (which rides on cookies the browser attaches
+automatically), SKPORT signs each request: a long-lived `cred` is exchanged for a
+short-lived signing token, and every call carries a per-request `sign`. The
+extension does this entirely in the background — no tab is opened.
 
 ## How it works
 
-- `background.js` opens a hidden `game.skport.com` tab once per day (on browser
-  startup and via a 6-hour alarm). It skips opening if today is already done.
-- `content.js` runs on that page, waits for the site to refresh its cached token,
-  reads `cred` (`SK_OAUTH_CRED_KEY`) and the signing token (`SK_TOKEN_CACHE_KEY`)
-  from `localStorage`, fetches the game role from `/api/v1/game/player/binding`,
-  computes `sign = md5(hmac_sha256_hex(path + ts + headerJson, token))`, and POSTs
-  to `/web/v1/game/endfield/attendance`.
-- On success the auto-opened tab closes and the toolbar badge shows `✓`.
+- `background.js` triggers a claim on browser startup and via a 6-hour alarm,
+  skipping if today is already done.
+- `skport.js` reads `cred` from the `skport.com` cookie, calls
+  `/web/v1/auth/refresh` to get a fresh signing token, resolves the game role from
+  `/api/v1/game/player/binding`, computes
+  `sign = md5(hmac_sha256_hex(path + body + ts + headerJson, token))`, and POSTs to
+  `/web/v1/game/endfield/attendance`.
+- `md5.js` is the MD5 used by the signature (Web Crypto has no MD5).
+- The toolbar badge shows `✓` after a successful claim, `✗` on failure.
 
 ## Setup
 
@@ -25,18 +26,16 @@ short-lived signing token. This extension reads `cred` + token from the page's
 2. Go to `chrome://extensions/`, enable **Developer Mode**.
 3. **Load unpacked** → choose this folder.
 
-The toolbar badge shows `✓` after a successful claim, `✗` on failure.
+After that just open the browser at least once a day; the check-in runs on its own.
 
-## Two accounts
+## Multiple accounts
 
 Each Chrome **profile** stores one logged-in account. Install (load unpacked) the
-extension in each profile; it automatically uses that profile's account. Just open
-each browser/profile at least once a day.
+extension in each profile; it automatically uses that profile's account.
 
 ## Notes
 
-- The signing token can expire. The extension reads the cached token after letting
-  the page bootstrap; if it is stale the run fails cleanly (no success recorded) and
-  retries on the next browser open. Re-opening the real site refreshes the token.
+- The signing token is refreshed from `cred` on every run, so an expired token is
+  not a problem. If `cred` itself expires, sign in to SKPORT again.
 - No CAPTCHA handling. If SKPORT ever gates check-in behind a CAPTCHA, claim
   manually that day.

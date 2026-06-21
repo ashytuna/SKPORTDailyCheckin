@@ -1,22 +1,8 @@
 'use strict';
 
-const ZONAI = "https://zonai.skport.com";
-const PLATFORM = "3";
-const VNAME = "1.0.0";
-const SK_LANG = "vi_VN";
-
-const CRED_KEY = "SK_OAUTH_CRED_KEY";
-const TOKEN_KEY = "SK_TOKEN_CACHE_KEY";
-
-const ATTENDANCE_PATH = "/web/v1/game/endfield/attendance";
-const BINDING_PATH = "/api/v1/game/player/binding";
-
-const INITIAL_DELAY = 3000;
-const CREDS_TIMEOUT = 15000;
-
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function md5(string) {
+// Minimal MD5 (RFC 1321). Returns a lowercase hex digest.
+// Needed because the Web Crypto API does not provide MD5.
+export function md5(string) {
   function rl(x, c) { return (x << c) | (x >>> (32 - c)); }
   function au(x, y) {
     var x4 = (x & 0x40000000), y4 = (y & 0x40000000), x8 = (x & 0x80000000), y8 = (y & 0x80000000);
@@ -84,98 +70,3 @@ function md5(string) {
   }
   return (wth(a) + wth(b) + wth(c) + wth(d)).toLowerCase();
 }
-
-async function hmacSha256Hex(keyStr, msgStr) {
-  const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey("raw", enc.encode(keyStr), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
-  const sig = await crypto.subtle.sign("HMAC", key, enc.encode(msgStr));
-  return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function makeSign(token, path, body, ts) {
-  const hj = `{"platform":"${PLATFORM}","timestamp":"${ts}","dId":"","vName":"${VNAME}"}`;
-  return md5(await hmacSha256Hex(token, path + body + ts + hj));
-}
-
-function nowTs() { return String(Math.floor(Date.now() / 1000)); }
-
-function buildHeaders(cred, ts, sign, role) {
-  const h = {
-    "accept": "*/*",
-    "content-type": "application/json",
-    "cred": cred,
-    "platform": PLATFORM,
-    "sk-language": SK_LANG,
-    "timestamp": ts,
-    "sign": sign,
-    "vname": VNAME,
-  };
-  if (role) h["sk-game-role"] = role;
-  return h;
-}
-
-async function signedFetch(method, path, cred, token, role) {
-  const ts = nowTs();
-  const sign = await makeSign(token, path, "", ts);
-  const res = await fetch(ZONAI + path, {
-    method,
-    headers: buildHeaders(cred, ts, sign, role),
-    body: method === "POST" ? "" : undefined,
-  });
-  try { return await res.json(); }
-  catch (e) { return { code: -1 }; }
-}
-
-function readCreds() {
-  return { cred: localStorage.getItem(CRED_KEY), token: localStorage.getItem(TOKEN_KEY) };
-}
-
-async function waitForCreds(timeoutMs) {
-  const start = Date.now();
-  while (Date.now() - start < timeoutMs) {
-    const c = readCreds();
-    if (c.cred && c.token) return c;
-    await sleep(500);
-  }
-  return readCreds();
-}
-
-function extractRole(bindingData) {
-  const apps = bindingData?.data?.list || [];
-  for (const app of apps) {
-    if (app.appCode && app.appCode !== "endfield") continue;
-    for (const b of app.bindingList || []) {
-      const r = b.defaultRole || (b.roles && b.roles[0]);
-      if (r && r.roleId) return `${b.gameId}_${r.roleId}_${r.serverId}`;
-    }
-  }
-  return null;
-}
-
-async function run() {
-  await sleep(INITIAL_DELAY);
-  const { cred, token } = await waitForCreds(CREDS_TIMEOUT);
-  if (!cred || !token) return false;
-
-  const binding = await signedFetch("GET", BINDING_PATH, cred, token, null);
-  if (binding.code !== 0) return false;
-  const role = extractRole(binding);
-  if (!role) return false;
-
-  // POST is idempotent: claiming twice just returns 'already claimed'.
-  const claim = await signedFetch("POST", ATTENDANCE_PATH, cred, token, role);
-  if (claim.code === 0) return true;
-  const after = await signedFetch("GET", ATTENDANCE_PATH, cred, token, role);
-  return after?.data?.hasToday === true;
-}
-
-(async function main() {
-  let resp;
-  try { resp = await chrome.runtime.sendMessage({ type: "hello" }); }
-  catch (e) { return; }
-  if (!resp || !resp.shouldRun) return;
-
-  let ok = false;
-  try { ok = await run(); } catch (e) { ok = false; }
-  try { await chrome.runtime.sendMessage({ type: "result", ok }); } catch (e) {}
-})();

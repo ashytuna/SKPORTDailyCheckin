@@ -2,28 +2,19 @@
   "short_name": "SKPORT Check-in",
   "name": "SKPORT Daily Check-in",
   "description": "Automatically claims the Arknights: Endfield daily check-in on SKPORT.",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "host_permissions": [
     "*://*.skport.com/*"
   ],
   "permissions": [
     "alarms",
-    "storage"
+    "storage",
+    "cookies"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "https://game.skport.com/endfield/*"
-      ],
-      "js": [
-        "content.js"
-      ],
-      "run_at": "document_idle"
-    }
-  ],
   "action": {
     "default_title": "SKPORT Daily Check-in",
     "default_icon": {
